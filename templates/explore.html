@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}Visualizations | Retail ML Platform{% endblock %}
+
+{% block content %}
+
+<div class="section-box">
+    <div class="controls">
+        <div>
+            <label for="exploreStore">Select Store:</label><br><br>
+            <select id="exploreStore"></select>
+        </div>
+    </div>
+</div>
+
+<div class="chart-wrap">
+    <h2 class="section-title">Last 30 Days Sales Trend</h2>
+    <div class="chart-box">
+        <canvas id="salesHistoryChart"></canvas>
+    </div>
+</div>
+
+<div class="chart-wrap">
+    <h2 class="section-title">Last 30 Days Customer Trend</h2>
+    <div class="chart-box">
+        <canvas id="customerHistoryChart"></canvas>
+    </div>
+</div>
+
+<div class="chart-wrap">
+    <h2 class="section-title">Sales vs Customers</h2>
+    <div class="chart-box">
+        <canvas id="salesCustomerBarChart"></canvas>
+    </div>
+</div>
+
+<script>
+let salesHistoryChart = null;
+let customerHistoryChart = null;
+let salesCustomerBarChart = null;
+
+async function loadStores() {
+    const res = await fetch("/stores");
+    const stores = await res.json();
+
+    const dropdown = document.getElementById("exploreStore");
+    dropdown.innerHTML = "";
+
+    stores.forEach(store => {
+        const option = document.createElement("option");
+        option.value = store;
+        option.textContent = "Store " + store;
+        dropdown.appendChild(option);
+    });
+
+    if (stores.length > 0) {
+        await loadStoreVisualizations(stores[0]);
+    }
+
+    dropdown.addEventListener("change", async function () {
+        await loadStoreVisualizations(this.value);
+    });
+}
+
+async function loadStoreVisualizations(storeId) {
+    const res = await fetch(`/api/store-history/${storeId}`);
+    const data = await res.json();
+
+    if (data.error) return;
+
+    renderSalesHistoryChart(data.dates, data.sales, storeId);
+    renderCustomerHistoryChart(data.dates, data.customers, storeId);
+    renderSalesCustomerBarChart(data.dates, data.sales, data.customers, storeId);
+}
+
+function renderSalesHistoryChart(labels, sales, storeId) {
+    const ctx = document.getElementById("salesHistoryChart").getContext("2d");
+
+    if (salesHistoryChart) salesHistoryChart.destroy();
+
+    salesHistoryChart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: labels,
+            datasets: [{
+                label: `Store ${storeId} Sales`,
+                data: sales,
+                borderColor: "#2563eb",
+                backgroundColor: "rgba(37,99,235,0.15)",
+                fill: true,
+                tension: 0.3,
+                pointRadius: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return "Sales: $" + Number(context.raw).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                            });
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    ticks: {
+                        callback: function(value) {
+                            return "$" + Number(value).toLocaleString();
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: "Sales ($)"
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderCustomerHistoryChart(labels, customers, storeId) {
+    const ctx = document.getElementById("customerHistoryChart").getContext("2d");
+
+    if (customerHistoryChart) customerHistoryChart.destroy();
+
+    customerHistoryChart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: labels,
+            datasets: [{
+                label: `Store ${storeId} Customers`,
+                data: customers,
+                borderColor: "#16a34a",
+                backgroundColor: "rgba(22,163,74,0.15)",
+                fill: true,
+                tension: 0.3,
+                pointRadius: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    title: {
+                        display: true,
+                        text: "Customers"
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderSalesCustomerBarChart(labels, sales, customers, storeId) {
+    const ctx = document.getElementById("salesCustomerBarChart").getContext("2d");
+
+    if (salesCustomerBarChart) salesCustomerBarChart.destroy();
+
+    salesCustomerBarChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: `Store ${storeId} Sales`,
+                    data: sales,
+                    backgroundColor: "rgba(37,99,235,0.75)",
+                    yAxisID: "ySales"
+                },
+                {
+                    label: `Store ${storeId} Customers`,
+                    data: customers,
+                    backgroundColor: "rgba(22,163,74,0.75)",
+                    yAxisID: "yCustomers"
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                ySales: {
+                    type: "linear",
+                    position: "left",
+                    ticks: {
+                        callback: function(value) {
+                            return "$" + Number(value).toLocaleString();
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: "Sales ($)"
+                    }
+                },
+                yCustomers: {
+                    type: "linear",
+                    position: "right",
+                    grid: {
+                        drawOnChartArea: false
+                    },
+                    title: {
+                        display: true,
+                        text: "Customers"
+                    }
+                }
+            }
+        }
+    });
+}
+
+loadStores();
+</script>
+
+{% endblock %}

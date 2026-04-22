@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+
+{% block title %}Customers | Retail ML Platform{% endblock %}
+
+{% block content %}
+
+<div class="section-box">
+    <div class="controls">
+        <label for="customerStoreDropdown">Select Store:</label>
+        <select id="customerStoreDropdown"></select>
+    </div>
+</div>
+
+<h2 class="section-title">Customer KPIs</h2>
+<div class="card-grid" id="customerKpiContainer"></div>
+
+<div style="height: 30px;"></div>
+
+<h2 class="section-title">Churn KPIs</h2>
+<div class="card-grid" id="churnKpiContainer"></div>
+
+<div style="height: 30px;"></div>
+
+<div class="chart-wrap">
+    <h2 class="section-title" style="text-align:center;">Customer Status Distribution</h2>
+    <div class="chart-box" style="max-width: 700px; margin: 0 auto;">
+        <canvas id="customerStatusChart"></canvas>
+    </div>
+</div>
+
+<div class="chart-wrap">
+    <h2 class="section-title" style="text-align:center;">Promo vs Non-Promo Churn Rate</h2>
+    <div class="chart-box" style="max-width: 900px; margin: 0 auto;">
+        <canvas id="promoChurnChart"></canvas>
+    </div>
+</div>
+
+<script>
+let customerStatusChartInstance = null;
+let promoChurnChartInstance = null;
+
+function formatValue(key, value) {
+    if (value === null || value === undefined || value === "nan" || value === "NaN") {
+        return "N/A";
+    }
+
+    const currencyKeys = [
+        "Revenue",
+        "Avg_Basket_Size",
+        "Monetary",
+        "Total_Sales"
+    ];
+
+    const integerKeys = [
+        "Customers",
+        "Total_Customers",
+        "Active_Customers",
+        "Churned_Customers",
+        "Frequency",
+        "Store_Visits"
+    ];
+
+    const percentKeys = [
+        "Churn_Rate",
+        "Avg_Churn_Rate",
+        "Promo_Usage_Rate"
+    ];
+
+    if (currencyKeys.includes(key)) {
+        const num = Number(value);
+        if (isNaN(num)) return value;
+        return "$" + num.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    if (integerKeys.includes(key)) {
+        const num = Number(value);
+        if (isNaN(num)) return value;
+        return num.toLocaleString();
+    }
+
+    if (percentKeys.includes(key)) {
+        const num = Number(value);
+        if (isNaN(num)) return value;
+        return (num * 100).toFixed(2) + "%";
+    }
+
+    if (typeof value === "number") {
+        return value.toLocaleString(undefined, {
+            maximumFractionDigits: 2
+        });
+    }
+
+    return value;
+}
+
+function prettyLabel(key) {
+    return key.replaceAll("_", " ");
+}
+
+function createCards(containerId, data) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = "";
+
+    Object.entries(data).forEach(([key, value]) => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        card.innerHTML = `
+            <div class="card-label">${prettyLabel(key)}</div>
+            <div class="card-value">${formatValue(key, value)}</div>
+        `;
+
+        container.appendChild(card);
+    });
+}
+
+function renderCustomerStatusChart(activeCustomers, churnedCustomers) {
+    const ctx = document.getElementById("customerStatusChart").getContext("2d");
+
+    if (customerStatusChartInstance) {
+        customerStatusChartInstance.destroy();
+    }
+
+    customerStatusChartInstance = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+            labels: ["Active Customers", "Churned Customers"],
+            datasets: [{
+                data: [activeCustomers, churnedCustomers],
+                backgroundColor: ["#16a34a", "#dc2626"],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: "top"
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `${context.label}: ${Number(context.raw).toLocaleString()}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderPromoChurnChart(promoRate, nonPromoRate) {
+    const ctx = document.getElementById("promoChurnChart").getContext("2d");
+
+    if (promoChurnChartInstance) {
+        promoChurnChartInstance.destroy();
+    }
+
+    promoChurnChartInstance = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: ["Promo Users", "Non-Promo Users"],
+            datasets: [{
+                label: "Churn Rate (%)",
+                data: [promoRate * 100, nonPromoRate * 100],
+                backgroundColor: ["#2563eb", "#dc2626"]
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.raw.toFixed(2) + "%";
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    suggestedMax: 100,
+                    ticks: {
+                        callback: function(value) {
+                            return value + "%";
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: "Churn Rate (%)"
+                    }
+                }
+            }
+        }
+    });
+}
+
+async function loadCustomerStores() {
+    const res = await fetch("/stores");
+    const stores = await res.json();
+
+    const dropdown = document.getElementById("customerStoreDropdown");
+    dropdown.innerHTML = "";
+
+    stores.forEach(store => {
+        const option = document.createElement("option");
+        option.value = store;
+        option.textContent = "Store " + store;
+        dropdown.appendChild(option);
+    });
+
+    if (stores.length > 0) {
+        await loadCustomerPage(stores[0]);
+    }
+
+    dropdown.addEventListener("change", async function () {
+        await loadCustomerPage(this.value);
+    });
+}
+
+async function loadCustomerPage(storeId) {
+    const [customerRes, churnRes, promoRes] = await Promise.all([
+        fetch(`/customer-kpis/${storeId}`),
+        fetch(`/churn-kpis/${storeId}`),
+        fetch(`/promo-churn/${storeId}`)
+    ]);
+
+    const customerData = await customerRes.json();
+    const churnData = await churnRes.json();
+    const promoData = await promoRes.json();
+
+    if (customerData.error || churnData.error || promoData.error) {
+        console.log(customerData, churnData, promoData);
+        return;
+    }
+
+    // Keep only unique customer KPIs
+    const filteredCustomerData = {
+        Customers: customerData.Customers,
+        Revenue: customerData.Revenue,
+        Avg_Basket_Size: customerData.Avg_Basket_Size
+    };
+
+    // Keep only unique churn KPIs
+    const filteredChurnData = {
+        Churn_Rate: churnData.Churn_Rate,
+        Active_Customers: churnData.Active_Customers,
+        Churned_Customers: churnData.Churned_Customers
+    };
+
+    createCards("customerKpiContainer", filteredCustomerData);
+    createCards("churnKpiContainer", filteredChurnData);
+
+    renderCustomerStatusChart(
+        Number(churnData.Active_Customers || 0),
+        Number(churnData.Churned_Customers || 0)
+    );
+
+    renderPromoChurnChart(
+        Number(promoData.Promo_Users_Churn_Rate || 0),
+        Number(promoData.Non_Promo_Users_Churn_Rate || 0)
+    );
+}
+
+loadCustomerStores();
+</script>
+
+{% endblock %}

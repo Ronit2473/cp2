@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}Compare Stores | Retail ML Platform{% endblock %}
+
+{% block content %}
+
+<div class="section-box">
+    <div class="controls">
+        <div>
+            <label for="store1">Select Store 1:</label><br><br>
+            <select id="store1"></select>
+        </div>
+
+        <div>
+            <label for="store2">Select Store 2:</label><br><br>
+            <select id="store2"></select>
+        </div>
+
+        <div style="align-self: end;">
+            <button onclick="compareStores()" style="
+                padding: 12px 18px;
+                border: none;
+                border-radius: 8px;
+                background: #2563eb;
+                color: white;
+                font-weight: 700;
+                cursor: pointer;
+            ">
+                Compare
+            </button>
+        </div>
+    </div>
+</div>
+
+<h2 class="section-title">Store KPI Comparison</h2>
+<div class="section-box" style="overflow-x:auto;">
+    <table id="compareTable" style="width:100%; border-collapse: collapse;">
+        <thead>
+            <tr style="background:#eff6ff;">
+                <th style="padding:12px; text-align:left; border-bottom:1px solid #cbd5e1;">KPI</th>
+                <th id="store1Header" style="padding:12px; text-align:left; border-bottom:1px solid #cbd5e1;">Store 1</th>
+                <th id="store2Header" style="padding:12px; text-align:left; border-bottom:1px solid #cbd5e1;">Store 2</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<div class="chart-wrap">
+    <h2 class="section-title">7-Day Forecast Comparison</h2>
+    <div class="chart-box">
+        <canvas id="forecastCompareChart"></canvas>
+    </div>
+</div>
+
+<script>
+let compareChartInstance = null;
+
+function prettyLabel(key) {
+    return key.replaceAll("_", " ");
+}
+
+function formatValue(key, value) {
+    if (value === null || value === undefined || value === "nan" || value === "NaN") {
+        return "N/A";
+    }
+
+    const currencyKeys = [
+        "Total_Sales",
+        "Avg_Daily_Sales",
+        "Total_Revenue",
+        "Revenue",
+        "Avg_Sales",
+        "Sales_per_Customer",
+        "Monetary"
+    ];
+
+    const integerKeys = [
+        "Total_Customers",
+        "Promo_Days",
+        "Sales_Rank",
+        "Total_Open_Days",
+        "Customers"
+    ];
+
+    const percentKeys = [
+        "Churn_Rate",
+        "Avg_Churn_Rate"
+    ];
+
+    if (currencyKeys.includes(key)) {
+        const num = Number(value);
+        if (isNaN(num)) return value;
+        return "$" + num.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    if (integerKeys.includes(key)) {
+        const num = Number(value);
+        if (isNaN(num)) return value;
+        return num.toLocaleString();
+    }
+
+    if (percentKeys.includes(key)) {
+        const num = Number(value);
+        if (isNaN(num)) return value;
+        return (num * 100).toFixed(2) + "%";
+    }
+
+    if (typeof value === "number") {
+        return value.toLocaleString(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+        });
+    }
+
+    return value;
+}
+
+async function loadStores() {
+    const res = await fetch("/stores");
+    const stores = await res.json();
+
+    const store1 = document.getElementById("store1");
+    const store2 = document.getElementById("store2");
+
+    store1.innerHTML = "";
+    store2.innerHTML = "";
+
+    stores.forEach((store, index) => {
+        const opt1 = document.createElement("option");
+        opt1.value = store;
+        opt1.textContent = "Store " + store;
+        store1.appendChild(opt1);
+
+        const opt2 = document.createElement("option");
+        opt2.value = store;
+        opt2.textContent = "Store " + store;
+        store2.appendChild(opt2);
+    });
+
+    if (stores.length > 1) {
+        store1.value = stores[0];
+        store2.value = stores[1];
+    }
+
+    compareStores();
+}
+
+async function compareStores() {
+    const s1 = document.getElementById("store1").value;
+    const s2 = document.getElementById("store2").value;
+
+    const [res1, res2] = await Promise.all([
+        fetch(`/store-dashboard/${s1}`),
+        fetch(`/store-dashboard/${s2}`)
+    ]);
+
+    const data1 = await res1.json();
+    const data2 = await res2.json();
+
+    if (data1.error || data2.error) return;
+
+    document.getElementById("store1Header").textContent = "Store " + s1;
+    document.getElementById("store2Header").textContent = "Store " + s2;
+
+    renderCompareTable(data1.kpis, data2.kpis);
+    renderCompareChart(s1, s2, data1.forecast || [], data2.forecast || []);
+}
+
+function renderCompareTable(kpis1, kpis2) {
+    const tbody = document.querySelector("#compareTable tbody");
+    tbody.innerHTML = "";
+
+    const keys = Array.from(new Set([
+        ...Object.keys(kpis1),
+        ...Object.keys(kpis2)
+    ]));
+
+    keys.forEach(key => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td style="padding:12px; border-bottom:1px solid #e2e8f0; font-weight:700;">${prettyLabel(key)}</td>
+            <td style="padding:12px; border-bottom:1px solid #e2e8f0;">${formatValue(key, kpis1[key])}</td>
+            <td style="padding:12px; border-bottom:1px solid #e2e8f0;">${formatValue(key, kpis2[key])}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function renderCompareChart(store1, store2, forecast1, forecast2) {
+    const ctx = document.getElementById("forecastCompareChart").getContext("2d");
+
+    if (compareChartInstance) {
+        compareChartInstance.destroy();
+    }
+
+    compareChartInstance = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7"],
+            datasets: [
+                {
+                    label: `Store ${store1} Forecast`,
+                    data: forecast1,
+                    borderColor: "#2563eb",
+                    backgroundColor: "rgba(37,99,235,0.15)",
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 4
+                },
+                {
+                    label: `Store ${store2} Forecast`,
+                    data: forecast2,
+                    borderColor: "#16a34a",
+                    backgroundColor: "rgba(22,163,74,0.15)",
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ": $" + Number(context.raw).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                            });
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    ticks: {
+                        callback: function(value) {
+                            return "$" + Number(value).toLocaleString();
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: "Predicted Sales ($)"
+                    }
+                }
+            }
+        }
+    });
+}
+
+loadStores();
+</script>
+
+{% endblock %}

@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Data | Retail ML Platform{% endblock %}
+
+{% block content %}
+
+<div class="section-box">
+    <h2 class="section-title">Upload CSV for Analysis</h2>
+    <div class="controls">
+        <input type="file" id="fileInput" accept=".csv">
+        <button onclick="uploadFile()" style="
+            padding: 12px 18px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+        ">
+            Analyze
+        </button>
+    </div>
+    <p class="muted" style="margin-top: 12px;">
+        Upload a CSV with sales data. If a valid date column is present, a 7-day forecast and insights will be generated.
+    </p>
+</div>
+
+<div id="warningBox" class="section-box" style="display:none; border-left: 5px solid #f59e0b;">
+    <h3 class="sub-title">Warning</h3>
+    <p id="warningText"></p>
+</div>
+
+<div class="section-box" id="uploadKpiSection" style="display:none;">
+    <h2 class="section-title">Uploaded Data KPIs</h2>
+    <div class="card-grid" id="uploadKpiContainer"></div>
+</div>
+
+<div class="chart-wrap" id="uploadForecastSection" style="display:none;">
+    <h2 class="section-title">7-Day Forecast</h2>
+    <div class="chart-box">
+        <canvas id="uploadForecastChart"></canvas>
+    </div>
+</div>
+
+<div class="section-box" id="insightSection" style="display:none;">
+    <h2 class="section-title">Key Insights from Uploaded Data</h2>
+    <div class="card-grid" id="insightCards"></div>
+</div>
+
+<div class="chart-wrap" id="trendSection" style="display:none;">
+    <h2 class="section-title">Forecast Trend</h2>
+    <div class="chart-box">
+        <canvas id="salesTrendChart"></canvas>
+    </div>
+</div>
+
+<script>
+let uploadForecastChartInstance = null;
+let salesTrendChartInstance = null;
+
+function formatValue(key, value) {
+    if (value === null || value === undefined || value === "nan" || value === "NaN") {
+        return "N/A";
+    }
+
+    const currencyKeys = [
+        "Total_Sales",
+        "Avg_Sales",
+        "Highest_Forecast",
+        "Lowest_Forecast",
+        "Revenue",
+        "Avg_Basket_Size",
+        "Monetary"
+    ];
+
+    const integerKeys = [
+        "Total_Rows",
+        "Total_Customers",
+        "Customers",
+        "Store_Visits",
+        "Frequency"
+    ];
+
+    const percentKeys = [
+        "Forecast_Growth_Percent"
+    ];
+
+    if (currencyKeys.includes(key)) {
+        const num = Number(value);
+        if (isNaN(num)) return value;
+        return "$" + num.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    if (integerKeys.includes(key)) {
+        const num = Number(value);
+        if (isNaN(num)) return value;
+        return num.toLocaleString();
+    }
+
+    if (percentKeys.includes(key)) {
+        const num = Number(value);
+        if (isNaN(num)) return value;
+        return num.toFixed(2) + "%";
+    }
+
+    if (typeof value === "number") {
+        return value.toLocaleString(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+        });
+    }
+
+    return value;
+}
+
+function prettyLabel(key) {
+    return key.replaceAll("_", " ");
+}
+
+function createCards(containerId, data) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = "";
+
+    Object.entries(data).forEach(([key, value]) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+            <div class="card-label">${prettyLabel(key)}</div>
+            <div class="card-value">${formatValue(key, value)}</div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+function renderUploadForecastChart(forecast) {
+    const ctx = document.getElementById("uploadForecastChart").getContext("2d");
+
+    if (uploadForecastChartInstance) {
+        uploadForecastChartInstance.destroy();
+    }
+
+    uploadForecastChartInstance = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7"],
+            datasets: [{
+                label: "Predicted Sales ($)",
+                data: forecast,
+                borderColor: "#2563eb",
+                backgroundColor: "rgba(37,99,235,0.15)",
+                fill: false,
+                tension: 0.3,
+                pointRadius: 5,
+                pointHoverRadius: 7
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return " $" + Number(context.raw).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                            });
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    ticks: {
+                        callback: function(value) {
+                            return "$" + Number(value).toLocaleString();
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: "Sales Amount ($)"
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: "Forecast Days"
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderSalesTrendChart(forecast) {
+    const ctx = document.getElementById("salesTrendChart").getContext("2d");
+
+    if (salesTrendChartInstance) {
+        salesTrendChartInstance.destroy();
+    }
+
+    salesTrendChartInstance = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7"],
+            datasets: [{
+                label: "Forecast Trend ($)",
+                data: forecast,
+                backgroundColor: "rgba(22,163,74,0.75)",
+                borderColor: "#16a34a",
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return " $" + Number(context.raw).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                            });
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    ticks: {
+                        callback: function(value) {
+                            return "$" + Number(value).toLocaleString();
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: "Forecast Sales ($)"
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: "Forecast Days"
+                    }
+                }
+            }
+        }
+    });
+}
+
+function generateInsights(data) {
+    const insights = {};
+
+    if (!data.kpis) return insights;
+
+    if (data.kpis.Total_Sales !== undefined) {
+        insights["Total_Sales"] = data.kpis.Total_Sales;
+    }
+
+    if (data.kpis.Avg_Sales !== undefined) {
+        insights["Avg_Sales"] = data.kpis.Avg_Sales;
+    }
+
+    if (data.forecast && data.forecast.length > 0) {
+        const maxForecast = Math.max(...data.forecast);
+        const minForecast = Math.min(...data.forecast);
+
+        insights["Highest_Forecast"] = maxForecast;
+        insights["Lowest_Forecast"] = minForecast;
+
+        if (data.forecast[0] !== 0) {
+            const growth = ((data.forecast[data.forecast.length - 1] - data.forecast[0]) / data.forecast[0]) * 100;
+            insights["Forecast_Growth_Percent"] = growth;
+        } else {
+            insights["Forecast_Growth_Percent"] = 0;
+        }
+    }
+
+    return insights;
+}
+
+async function uploadFile() {
+    const file = document.getElementById("fileInput").files[0];
+
+    if (!file) {
+        alert("Please select a CSV file first.");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("/analyze-upload", {
+        method: "POST",
+        body: formData
+    });
+
+    const data = await res.json();
+
+    if (data.error) {
+        alert(data.error);
+        return;
+    }
+
+    if (data.kpis) {
+        document.getElementById("uploadKpiSection").style.display = "block";
+        createCards("uploadKpiContainer", data.kpis);
+    } else {
+        document.getElementById("uploadKpiSection").style.display = "none";
+    }
+
+    if (data.forecast && data.forecast.length > 0) {
+        document.getElementById("uploadForecastSection").style.display = "block";
+        renderUploadForecastChart(data.forecast);
+
+        document.getElementById("trendSection").style.display = "block";
+        renderSalesTrendChart(data.forecast);
+    } else {
+        document.getElementById("uploadForecastSection").style.display = "none";
+        document.getElementById("trendSection").style.display = "none";
+    }
+
+    const insights = generateInsights(data);
+    if (Object.keys(insights).length > 0) {
+        document.getElementById("insightSection").style.display = "block";
+        createCards("insightCards", insights);
+    } else {
+        document.getElementById("insightSection").style.display = "none";
+    }
+
+    if (data.warning) {
+        document.getElementById("warningBox").style.display = "block";
+        document.getElementById("warningText").innerText = data.warning;
+    } else {
+        document.getElementById("warningBox").style.display = "none";
+    }
+}
+</script>
+
+{% endblock %}
