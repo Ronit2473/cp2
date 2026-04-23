@@ -22,3 +22,4 @@ python-multipart
 langchain 
 langchain-nvidia-ai-endpoints 
 uvicorn
+pyarrow
