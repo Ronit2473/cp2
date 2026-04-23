@@ -23,3 +23,4 @@ langchain
 langchain-nvidia-ai-endpoints 
 uvicorn
 pyarrow
+fastparquet
