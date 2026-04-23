@@ -29,7 +29,7 @@ templates = Jinja2Templates(directory="templates")
 forecast_df = pd.read_parquet("forecast_dataset.parquet")
 store_kpi_df = pd.read_csv("store_kpis.csv")
 customer_kpi_df = pd.read_csv("c2.csv")
-customer_df = pd.read_parquet("cc.parquet", dtype={"StateHoliday": "str"})
+customer_df = pd.read_parquet("cc.parquet")
 
 forecast_df["Date"] = pd.to_datetime(forecast_df["Date"], errors="coerce")
 forecast_df = forecast_df.dropna(subset=["Date"]).copy()
